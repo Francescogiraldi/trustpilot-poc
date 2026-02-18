@@ -2,3 +2,5 @@ streamlit
 numpy
 transformers
 torch
+sentencepiece
+protobuf
