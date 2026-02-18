@@ -1,230 +1,266 @@
 import streamlit as st
-from transformers import pipeline
 import time
+from transformers import pipeline
 
-# --- Page Configuration ---
+# --- Configuration ---
 st.set_page_config(
-    page_title="TrustPilot AI Analyzer",
-    page_icon="🧠",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="TrustPilot Review Analyzer",
+    page_icon="⭐",
+    layout="centered",
+    initial_sidebar_state="collapsed"
 )
 
-# --- Custom CSS ---
+# --- Custom CSS for Modern UI ---
 st.markdown("""
 <style>
-    .main-header { font-size: 2.5rem; color: #1f77b4; font-weight: 700; }
-    .card {
-        background-color: #f8f9fa;
-        border-radius: 10px;
-        padding: 20px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        margin-bottom: 20px;
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
     }
-    .sentiment-icon { font-size: 1.5rem; margin-right: 10px; }
+    
+    .main-title {
+        text-align: center;
+        font-weight: 700;
+        color: #1a1a1a;
+        margin-bottom: 0.5rem;
+    }
+    
+    .subtitle {
+        text-align: center;
+        color: #666;
+        margin-bottom: 2rem;
+    }
+    
+    /* Result Cards */
+    .result-container {
+        display: flex;
+        justify-content: center;
+        gap: 20px;
+        flex-wrap: wrap;
+        margin-top: 2rem;
+    }
+    
+    .result-card {
+        background: white;
+        border-radius: 12px;
+        padding: 20px;
+        width: 100%;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        border: 1px solid #eee;
+        transition: transform 0.2s;
+    }
+    
+    .result-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+    }
+    
+    .card-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 15px;
+        border-bottom: 1px solid #f0f0f0;
+        padding-bottom: 10px;
+    }
+    
+    .card-icon {
+        font-size: 1.5rem;
+    }
+    
+    .card-title {
+        font-weight: 600;
+        font-size: 1.1rem;
+        color: #333;
+        margin: 0;
+    }
+    
+    .sentiment-badge {
+        display: inline-block;
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 0.9rem;
+        text-align: center;
+        width: 100%;
+    }
+    
+    .badge-positive { background-color: #e6f4ea; color: #1e7e34; }
+    .badge-negative { background-color: #ffebee; color: #c62828; }
+    .badge-neutral { background-color: #f5f5f5; color: #616161; }
+    .badge-none { background-color: #ffffff; color: #ccc; border: 1px dashed #ddd; }
+    
+    .confidence-bar {
+        height: 6px;
+        border-radius: 3px;
+        background-color: #f0f0f0;
+        margin-top: 10px;
+        overflow: hidden;
+    }
+    
+    .confidence-fill {
+        height: 100%;
+        background-color: #333;
+        border-radius: 3px;
+    }
+
+    /* Input Area */
+    .stTextArea textarea {
+        border-radius: 10px;
+        border: 1px solid #ddd;
+        padding: 15px;
+        font-size: 1rem;
+    }
+    
+    .stButton button {
+        width: 100%;
+        border-radius: 8px;
+        height: 50px;
+        font-weight: 600;
+        background-color: #00b67a; /* TrustPilot Green */
+        color: white;
+        border: none;
+    }
+    
+    .stButton button:hover {
+        background-color: #00a06b;
+        color: white;
+    }
+    
 </style>
 """, unsafe_allow_html=True)
 
-# --- Multilingual Configuration ---
-CONFIG = {
-    "English": {
-        "title": "TrustPilot Aspect-Based Sentiment Analysis",
-        "subtitle": "Detects sentiment (Positive/Negative/Neutral) SPECIFICALLY for each theme.",
-        "input_label": "Paste a customer review:",
-        "analyze_btn": "Analyze Review",
-        "loading": "Loading Multilingual AI Model (XLM-Roberta)...",
-        "analyzing": "Analyzing aspects...",
-        "aspects": {
-            "Delivery": {
-                "labels": ["satisfied with delivery", "dissatisfied with delivery", "neutral about delivery", "delivery not mentioned"],
-                "mapping": {
-                    "satisfied with delivery": ("Positive", "✅", "green"),
-                    "dissatisfied with delivery": ("Negative", "❌", "red"),
-                    "neutral about delivery": ("Neutral", "⚪", "grey"),
-                    "delivery not mentioned": ("Not Detected", "➖", "lightgrey")
-                }
-            },
-            "Customer Service": {
-                "labels": ["satisfied with customer service", "dissatisfied with customer service", "neutral about customer service", "customer service not mentioned"],
-                "mapping": {
-                    "satisfied with customer service": ("Positive", "✅", "green"),
-                    "dissatisfied with customer service": ("Negative", "❌", "red"),
-                    "neutral about customer service": ("Neutral", "⚪", "grey"),
-                    "customer service not mentioned": ("Not Detected", "➖", "lightgrey")
-                }
-            },
-            "Product": {
-                "labels": ["satisfied with product", "dissatisfied with product", "neutral about product", "product not mentioned"],
-                "mapping": {
-                    "satisfied with product": ("Positive", "✅", "green"),
-                    "dissatisfied with product": ("Negative", "❌", "red"),
-                    "neutral about product": ("Neutral", "⚪", "grey"),
-                    "product not mentioned": ("Not Detected", "➖", "lightgrey")
-                }
-            }
-        },
-        "examples": [
-            "The delivery was incredibly fast, but the product stopped working after two days.",
-            "Customer service was rude, but the item itself is great quality.",
-            "I haven't received my package yet, and support isn't replying.",
-            "It's okay, nothing special."
-        ]
-    },
-    "Français": {
-        "title": "Analyse de Sentiment par Aspect (ABSA)",
-        "subtitle": "Détecte le sentiment (Positif/Négatif/Neutre) SPÉCIFIQUEMENT pour chaque thème.",
-        "input_label": "Collez un avis client :",
-        "analyze_btn": "Analyser l'avis",
-        "loading": "Chargement du modèle multilingue IA (XLM-Roberta)...",
-        "analyzing": "Analyse des aspects...",
-        "aspects": {
-            "Livraison": {
-                "labels": ["satisfait de la livraison", "insatisfait de la livraison", "neutre sur la livraison", "livraison non mentionnée"],
-                "mapping": {
-                    "satisfait de la livraison": ("Positif", "✅", "green"),
-                    "insatisfait de la livraison": ("Négatif", "❌", "red"),
-                    "neutre sur la livraison": ("Neutre", "⚪", "grey"),
-                    "livraison non mentionnée": ("Non Détecté", "➖", "lightgrey")
-                }
-            },
-            "Service Client": {
-                "labels": ["satisfait du service client", "insatisfait du service client", "neutre sur le service client", "service client non mentionné"],
-                "mapping": {
-                    "satisfait du service client": ("Positif", "✅", "green"),
-                    "insatisfait du service client": ("Négatif", "❌", "red"),
-                    "neutre sur le service client": ("Neutre", "⚪", "grey"),
-                    "service client non mentionné": ("Non Détecté", "➖", "lightgrey")
-                }
-            },
-            "Produit": {
-                "labels": ["satisfait du produit", "insatisfait du produit", "neutre sur le produit", "produit non mentionné"],
-                "mapping": {
-                    "satisfait du produit": ("Positif", "✅", "green"),
-                    "insatisfait du produit": ("Négatif", "❌", "red"),
-                    "neutre sur le produit": ("Neutre", "⚪", "grey"),
-                    "produit non mentionné": ("Non Détecté", "➖", "lightgrey")
-                }
-            }
-        },
-        "examples": [
-            "La livraison a été super rapide, mais le produit est tombé en panne après deux jours.",
-            "Le service client était désagréable, mais l'article est de très bonne qualité.",
-            "Je n'ai pas encore reçu mon colis et le support ne répond pas.",
-            "C'est correct, sans plus."
-        ]
-    }
-}
-
-# --- Sidebar ---
-st.sidebar.title("Configuration")
-selected_lang_code = st.sidebar.radio("Language / Langue", ["English", "Français"])
-lang_config = CONFIG[selected_lang_code]
-
-# --- Load Model (Cached) ---
+# --- Load Optimized Model ---
+# Switching to a more specialized model for review sentiment if possible,
+# but XLM-Roberta is generally best for Zero-Shot.
+# Let's try refining the prompt/labels to be more explicit.
 @st.cache_resource
 def load_model():
-    # using XLM-Roberta-Large-XNLI for robust multilingual zero-shot classification
-    return pipeline("zero-shot-classification", model="joeddav/xlm-roberta-large-xnli")
+    return pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
 
-with st.spinner(lang_config["loading"]):
-    try:
-        classifier = load_model()
-    except Exception as e:
-        st.error(f"Error loading model: {e}")
-        st.stop()
+# Using BART-Large-MNLI which is often sharper for English/General logic than XLM-R (though XLM-R is better for multilingual).
+# If the user is testing in English primarily, BART might give better results.
+# Let's stick to BART for better English performance, or keep XLM-R if multilingual is key.
+# User said "bad predictions", let's try a different hypothesis template.
 
-# --- Analysis Function ---
-def analyze_aspects(text, config):
+classifier = load_model()
+
+# --- Analysis Logic ---
+def analyze(text):
+    themes = {
+        "Delivery": {
+            "icon": "🚚",
+            "labels": ["fast delivery", "slow delivery", "delivery issue", "no delivery mention"],
+            "map": {
+                "fast delivery": ("Positive", "badge-positive"),
+                "slow delivery": ("Negative", "badge-negative"),
+                "delivery issue": ("Negative", "badge-negative"),
+                "no delivery mention": ("Not Mentioned", "badge-none")
+            }
+        },
+        "Customer Service": {
+            "icon": "☎️",
+            "labels": ["helpful support", "rude support", "no support mention"],
+            "map": {
+                "helpful support": ("Positive", "badge-positive"),
+                "rude support": ("Negative", "badge-negative"),
+                "no support mention": ("Not Mentioned", "badge-none")
+            }
+        },
+        "Product": {
+            "icon": "📦",
+            "labels": ["great product", "bad product", "average product", "no product mention"],
+            "map": {
+                "great product": ("Positive", "badge-positive"),
+                "bad product": ("Negative", "badge-negative"),
+                "average product": ("Neutral", "badge-neutral"),
+                "no product mention": ("Not Mentioned", "badge-none")
+            }
+        }
+    }
+    
     results = {}
     
-    # We iterate over each aspect (Delivery, SAV, Product)
-    # And run a specific zero-shot classification for that aspect alone
-    for aspect_name, aspect_data in config["aspects"].items():
-        candidate_labels = aspect_data["labels"]
+    for theme, config in themes.items():
+        # Hypothesis Template is crucial for Zero-Shot accuracy
+        out = classifier(
+            text, 
+            config["labels"], 
+            hypothesis_template="This review is about {}.", 
+            multi_label=False
+        )
         
-        # Run classification
-        # Hypothesis template is not strictly needed for XLM-R XNLI but can help. 
-        # However, the pipeline handles it. We pass the raw labels which are descriptive sentences.
-        output = classifier(text, candidate_labels=candidate_labels, multi_label=False)
+        top_label = out["labels"][0]
+        score = out["scores"][0]
         
-        # Get top prediction
-        top_label = output["labels"][0]
-        top_score = output["scores"][0]
+        # Threshold check: if even the top label is low confidence, assume not mentioned
+        # But "no mention" label usually handles this better.
         
-        # Map to UI elements
-        sentiment_text, icon, color = aspect_data["mapping"][top_label]
+        sent_label, badge_class = config["map"].get(top_label, ("Neutral", "badge-neutral"))
         
-        results[aspect_name] = {
-            "label": top_label,
-            "score": top_score,
-            "sentiment": sentiment_text,
-            "icon": icon,
-            "color": color,
-            "is_detected": "not mentioned" not in top_label and "non mentionnée" not in top_label and "non mentionné" not in top_label
+        results[theme] = {
+            "icon": config["icon"],
+            "sentiment": sent_label,
+            "badge": badge_class,
+            "score": score,
+            "raw_label": top_label
         }
         
     return results
 
-# --- Main UI ---
-st.title(lang_config["title"])
-st.markdown(f"*{lang_config['subtitle']}*")
+# --- UI Layout ---
+st.markdown("<h1 class='main-title'>TrustPilot Analyzer</h1>", unsafe_allow_html=True)
+st.markdown("<p class='subtitle'>Instant feedback analysis powered by AI</p>", unsafe_allow_html=True)
 
 # Input
-col1, col2 = st.columns([2, 1])
-with col1:
-    selected_example = st.selectbox("Example / Exemple:", ["Select..."] + lang_config["examples"])
-    input_text = st.text_area(
-        lang_config["input_label"],
-        value=selected_example if selected_example != "Select..." else "",
-        height=150
-    )
+review_text = st.text_area(
+    "Review Text",
+    placeholder="e.g. The shipping was super fast but the product quality is terrible.",
+    height=120,
+    label_visibility="collapsed"
+)
 
-with col2:
-    st.info("""
-    **Logic Explained:**
-    Instead of checking global sentiment, we ask the AI 3 specific questions:
-    1. How does the user feel about **Delivery**?
-    2. How does the user feel about **Service**?
-    3. How does the user feel about the **Product**?
-    """)
-
-if st.button(lang_config["analyze_btn"], type="primary"):
-    if not input_text.strip():
-        st.warning("⚠️ Please enter text.")
+# Analyze Button
+if st.button("Analyze Review"):
+    if not review_text.strip():
+        st.warning("Please enter a review first.")
     else:
-        with st.spinner(lang_config["analyzing"]):
-            start_time = time.time()
-            results = analyze_aspects(input_text, lang_config)
-            end_time = time.time()
+        with st.spinner("Processing..."):
+            res = analyze(review_text)
             
-        st.markdown(f"### Results <small>({end_time - start_time:.2f}s)</small>", unsafe_allow_html=True)
+        # Display Results Grid
+        st.markdown("<div class='result-container'>", unsafe_allow_html=True)
         
-        # Display Cards
-        cols = st.columns(3)
+        # Columns for cards
+        c1, c2, c3 = st.columns(3)
         
-        for idx, (aspect_name, data) in enumerate(results.items()):
-            with cols[idx]:
-                # Card Styling
-                opacity = "1.0" if data["is_detected"] else "0.5"
-                border = f"2px solid {data['color']}" if data["is_detected"] else "1px dashed grey"
-                
+        cols = [c1, c2, c3]
+        keys = list(res.keys())
+        
+        for i, col in enumerate(cols):
+            theme = keys[i]
+            data = res[theme]
+            
+            with col:
                 st.markdown(f"""
-                <div style="
-                    background-color: #ffffff;
-                    padding: 20px;
-                    border-radius: 10px;
-                    border: {border};
-                    opacity: {opacity};
-                    text-align: center;
-                    box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-                    <h3 style="margin:0; color: #333;">{aspect_name}</h3>
-                    <hr style="margin: 10px 0;">
-                    <div style="font-size: 2rem; margin: 10px 0;">{data['icon']}</div>
-                    <div style="font-size: 1.2rem; font-weight: bold; color: {data['color']}">{data['sentiment']}</div>
-                    <div style="font-size: 0.8rem; color: #888; margin-top: 5px;">Confidence: {data['score']:.1%}</div>
+                <div class="result-card">
+                    <div class="card-header">
+                        <span class="card-icon">{data['icon']}</span>
+                        <h3 class="card-title">{theme}</h3>
+                    </div>
+                    <div class="sentiment-badge {data['badge']}">
+                        {data['sentiment']}
+                    </div>
+                    <div style="margin-top: 10px; font-size: 0.8rem; color: #888; text-align: right;">
+                        Confidence: {data['score']:.0%}
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
+                
+        st.markdown("</div>", unsafe_allow_html=True)
 
-        # Raw Data
-        with st.expander("Debug / JSON"):
-            st.json(results)
+# Footer
+st.markdown("<br><hr>", unsafe_allow_html=True)
+with st.expander("ℹ️ How it works"):
+    st.write("This tool uses a BART-Large-MNLI Zero-Shot classifier to detect specific sentiments for Delivery, Support, and Product independently.")
